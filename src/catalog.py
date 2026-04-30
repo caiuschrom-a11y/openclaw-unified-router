@@ -68,6 +68,182 @@ CATALOG: list[ProductSKU] = [
         metadata={"tier": "pro", "mark_quota": "25"},
     ),
 
+    # ---------- review-monitor ----------
+    ProductSKU(product_slug="review-monitor", display_name="review-monitor Single",
+               description="Daily Yelp/Google review monitor — 1 location",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "single", "location_count": "1"}),
+    ProductSKU(product_slug="review-monitor", display_name="review-monitor Multi",
+               description="5 locations + intra-day alerts",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "multi", "location_count": "5"}),
+
+    # ---------- lead-list-builder ----------
+    ProductSKU(product_slug="lead-list-builder", display_name="lead-list-builder Single",
+               description="One-shot 200-row B2B lead list, ICP-classified",
+               pricing_model="one_time", fulfillment_kind="concierge_email",
+               metadata={"plan": "single", "row_count": "200"}),
+    ProductSKU(product_slug="lead-list-builder", display_name="lead-list-builder Bulk",
+               description="1000-row enriched list",
+               pricing_model="one_time", fulfillment_kind="concierge_email",
+               metadata={"plan": "bulk", "row_count": "1000"}),
+
+    # ---------- web-watcher ----------
+    ProductSKU(product_slug="web-watcher", display_name="web-watcher Solo",
+               description="10 pages monitored every 15 min",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "solo", "page_count": "10"}),
+    ProductSKU(product_slug="web-watcher", display_name="web-watcher Pro",
+               description="100 pages monitored every 15 min",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "pro", "page_count": "100"}),
+    ProductSKU(product_slug="web-watcher", display_name="web-watcher Firm",
+               description="1000 pages + Slack/email alerts",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "firm", "page_count": "1000"}),
+
+    # ---------- rfp-grant-scorer ----------
+    ProductSKU(product_slug="rfp-grant-scorer", display_name="rfp-grant-scorer Solo",
+               description="Scoring 10 RFPs/mo against your ICP",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "solo", "monthly_rfps": "10"}),
+    ProductSKU(product_slug="rfp-grant-scorer", display_name="rfp-grant-scorer Firm",
+               description="Unlimited RFP scoring + RFP-fit memos",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "firm"}),
+
+    # ---------- translation-svc ----------
+    ProductSKU(product_slug="translation-svc", display_name="translation-svc Per-doc",
+               description="One document, up to 10K words",
+               pricing_model="one_time", fulfillment_kind="api_key",
+               metadata={"word_quota": "10000"}),
+    ProductSKU(product_slug="translation-svc", display_name="translation-svc Bulk",
+               description="100K-word bundle",
+               pricing_model="one_time", fulfillment_kind="api_key",
+               metadata={"word_quota": "100000"}),
+
+    # ---------- competitor-matrix ----------
+    ProductSKU(product_slug="competitor-matrix", display_name="competitor-matrix Solo",
+               description="Up to 5 competitors tracked, weekly intel digest",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "solo", "competitor_count": "5"}),
+    ProductSKU(product_slug="competitor-matrix", display_name="competitor-matrix Firm",
+               description="20 competitors + Slack hot-alerts",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "firm", "competitor_count": "20"}),
+
+    # ---------- yt-faceless ----------
+    ProductSKU(product_slug="yt-faceless", display_name="yt-faceless Single",
+               description="1 channel, 30 long-form videos/mo",
+               pricing_model="subscription_monthly", fulfillment_kind="concierge_email",
+               metadata={"plan": "single", "channels": "1"}),
+    ProductSKU(product_slug="yt-faceless", display_name="yt-faceless Multi",
+               description="5 channels, 30 videos each",
+               pricing_model="subscription_monthly", fulfillment_kind="concierge_email",
+               metadata={"plan": "multi", "channels": "5"}),
+
+    # ---------- newsletter-engine ----------
+    ProductSKU(product_slug="newsletter-engine", display_name="newsletter-engine Solo",
+               description="Weekly newsletter — 1 niche",
+               pricing_model="subscription_monthly", fulfillment_kind="concierge_email",
+               metadata={"plan": "solo", "niches": "1"}),
+    ProductSKU(product_slug="newsletter-engine", display_name="newsletter-engine Network",
+               description="5 newsletters across 5 niches",
+               pricing_model="subscription_monthly", fulfillment_kind="concierge_email",
+               metadata={"plan": "network", "niches": "5"}),
+
+    # ---------- samgov-tracker ----------
+    ProductSKU(product_slug="samgov-tracker", display_name="samgov-tracker Solo",
+               description="Daily SAM.gov fit-scoring — 1 capability statement",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "solo"}),
+    ProductSKU(product_slug="samgov-tracker", display_name="samgov-tracker Firm",
+               description="5 capability statements + intra-day",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "firm"}),
+
+    # ---------- ats-fingerprint-intel ----------
+    ProductSKU(product_slug="ats-fingerprint-intel", display_name="ats-fingerprint-intel License",
+               description="ATS fingerprint dataset license — 1 yr update access",
+               pricing_model="one_time", fulfillment_kind="license_key",
+               metadata={"tier": "annual"}),
+
+    # ---------- section174-tax ----------
+    ProductSKU(product_slug="section174-tax", display_name="section174-tax Engagement",
+               description="Section 174 R&D-credit prep for one fiscal year",
+               pricing_model="one_time", fulfillment_kind="concierge_email",
+               metadata={"engagement_kind": "single_year"}),
+
+    # ---------- ofac-screener ----------
+    ProductSKU(product_slug="ofac-screener", display_name="ofac-screener Single",
+               description="OFAC + sanctions screening as a service",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "single"}),
+
+    # ---------- codebase-security-auditor ----------
+    ProductSKU(product_slug="codebase-security-auditor", display_name="codebase-security-auditor Repo",
+               description="Monthly security scan for 1 repo",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "repo", "repo_count": "1"}),
+    ProductSKU(product_slug="codebase-security-auditor", display_name="codebase-security-auditor Org",
+               description="All repos org-wide, monthly + on-PR",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "org"}),
+
+    # ---------- email-triage ----------
+    ProductSKU(product_slug="email-triage", display_name="email-triage Solo",
+               description="Inbox triage + draft replies — 1 inbox",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "solo", "inbox_count": "1"}),
+    ProductSKU(product_slug="email-triage", display_name="email-triage Pro",
+               description="5 inboxes, priority routing",
+               pricing_model="subscription_monthly", fulfillment_kind="api_key",
+               metadata={"plan": "pro", "inbox_count": "5"}),
+
+    # ---------- bulk-listing-rewriter ----------
+    ProductSKU(product_slug="bulk-listing-rewriter", display_name="bulk-listing-rewriter Project",
+               description="Rewrite up to 10K listings (one-shot)",
+               pricing_model="one_time", fulfillment_kind="concierge_email",
+               metadata={"listing_quota": "10000"}),
+
+    # ---------- brand-monitor ----------
+    ProductSKU(
+        product_slug="brand-monitor",
+        display_name="brand-monitor Starter",
+        description="Daily Reddit/HN mentions for 1 brand + sentiment alerts",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="api_key",
+        metadata={"plan": "starter", "brand_count": "1"},
+    ),
+    ProductSKU(
+        product_slug="brand-monitor",
+        display_name="brand-monitor Pro",
+        description="5 brands tracked, 4× daily polls, urgent alerts within 1hr",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="api_key",
+        metadata={"plan": "pro", "brand_count": "5"},
+    ),
+
+    # ---------- mcp-faa-notams ----------
+    ProductSKU(
+        product_slug="mcp-faa-notams",
+        display_name="mcp-faa-notams Lifetime",
+        description="FAA NOTAM watcher MCP — pilot/dispatcher tool, lifetime self-host",
+        pricing_model="one_time",
+        fulfillment_kind="license_key",
+        metadata={"tier": "lifetime"},
+    ),
+
+    # ---------- mcp-metar-taf ----------
+    ProductSKU(
+        product_slug="mcp-metar-taf",
+        display_name="mcp-metar-taf Lifetime",
+        description="METAR/TAF weather-briefing MCP for pilots — lifetime self-host",
+        pricing_model="one_time",
+        fulfillment_kind="license_key",
+        metadata={"tier": "lifetime"},
+    ),
+
     # ---------- mcp-patent ----------
     ProductSKU(
         product_slug="mcp-patent",
