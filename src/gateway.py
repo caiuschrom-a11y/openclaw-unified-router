@@ -310,12 +310,115 @@ async def run_product(product_slug: str, request: Request, authorization: str | 
     }
 
 
+PRODUCT_SCHEMAS: dict[str, dict[str, Any]] = {
+    "coldmail": {
+        "fields": {
+            "recipient_name": "string — name of the prospect",
+            "recipient_company": "string — their company",
+            "context": "string — what you know about them (recent post, role, team size)",
+            "offer": "string — your concrete ask in one line",
+            "sender_company": "string — your company name",
+        },
+        "example": {
+            "recipient_name": "Sarah Chen",
+            "recipient_company": "Acme Robotics",
+            "context": "Saw their Series A announcement; they're scaling QA",
+            "offer": "30-min walkthrough of how we cut their automated-test runtime 4x",
+            "sender_company": "FastTest Co",
+        },
+    },
+    "code-review-bot": {
+        "fields": {
+            "pr_title": "string",
+            "pr_description": "string",
+            "diff": "string — unified-diff of the PR",
+        },
+        "example": {
+            "pr_title": "Add caching to user lookup",
+            "pr_description": "Reduces p99 by 40%",
+            "diff": "--- a/users.py\n+++ b/users.py\n@@\n+from functools import lru_cache\n+@lru_cache(maxsize=1024)\n def lookup(user_id):\n     ...",
+        },
+    },
+    "pricing-intel": {
+        "fields": {"competitor": "string", "page_text": "string — pasted pricing-page content"},
+        "example": {"competitor": "Stripe", "page_text": "Standard 2.9% + 30¢ per transaction. Pro: custom..."},
+    },
+    "shopify-support-bot": {
+        "fields": {
+            "store_name": "string", "order_summary": "string",
+            "customer_message": "string", "policies": "string (optional)",
+        },
+        "example": {
+            "store_name": "Bear & Honey",
+            "order_summary": "#1234, 1x organic raw honey 16oz, shipped 3 days ago via USPS",
+            "customer_message": "I haven't received my order yet, where is it?",
+            "policies": "Standard: 5-7 business days. Refund within 30 days if defective.",
+        },
+    },
+    "meeting-notes-bot": {
+        "fields": {
+            "meeting_title": "string", "attendees": "string",
+            "transcript": "string — full meeting transcript",
+        },
+        "example": {
+            "meeting_title": "Q1 product roadmap",
+            "attendees": "Alice, Bob, Carol",
+            "transcript": "Alice: Should we ship feature X first? Bob: Let's...",
+        },
+    },
+    "chargeback-drafter": {
+        "fields": {
+            "reason_code": "string e.g. 4855", "reason_text": "string",
+            "order_summary": "string", "evidence": "string",
+        },
+        "example": {
+            "reason_code": "4855",
+            "reason_text": "Goods/services not received",
+            "order_summary": "Order #1234, $89, shipped Jan 5 via UPS 1Z...",
+            "evidence": "UPS tracking shows delivered Jan 8. Customer signed.",
+        },
+    },
+    "legal-doc-drafter": {
+        "fields": {
+            "doc_type": "string (NDA, Contractor Agreement, Mutual NDA, Letter of Intent)",
+            "parties": "string — names + roles",
+            "key_terms": "string", "jurisdiction": "string e.g. Delaware",
+        },
+        "example": {
+            "doc_type": "Mutual NDA",
+            "parties": "Acme Corp (Delaware C-Corp) and Bob Smith (independent consultant)",
+            "key_terms": "2-year term, mutual disclosure of trade secrets, standard carve-outs",
+            "jurisdiction": "Delaware",
+        },
+    },
+    "voice-agent-smb": {
+        "fields": {
+            "business_name": "string", "hours": "string", "services": "string",
+            "caller_input": "string", "history": "string (optional)",
+        },
+        "example": {
+            "business_name": "Joe's Plumbing",
+            "hours": "Mon-Fri 8am-6pm",
+            "services": "Drain cleaning, water heater install, leak repair",
+            "caller_input": "Hi, my water heater is leaking, can someone come today?",
+        },
+    },
+    "hipaa-doc-intake": {
+        "fields": {"form_text": "string — full intake form content"},
+        "example": {
+            "form_text": "Patient Name: Jane Doe\nDOB: 1985-03-12\nMRN: 100234\nPresenting concern: Persistent cough...",
+        },
+    },
+}
+
+
 @router.get("/v1/{product_slug}/info")
 def product_info(product_slug: str) -> dict[str, Any]:
     """Public — describes the product's expected request body schema."""
     if product_slug not in PRODUCT_PROMPTS:
         raise HTTPException(404, f"unknown product: {product_slug}")
     cfg = PRODUCT_PROMPTS[product_slug]
+    schema = PRODUCT_SCHEMAS.get(product_slug, {})
     return {
         "slug": product_slug,
         "model": cfg["model"],
@@ -323,4 +426,12 @@ def product_info(product_slug: str) -> dict[str, Any]:
         "endpoint": f"POST /v1/{product_slug}/run",
         "auth": "Bearer ock_xxx (your API key)",
         "system_prompt_preview": cfg["system"][:200] + "...",
+        "request_fields": schema.get("fields", {}),
+        "example_request": schema.get("example", {}),
+        "curl": (
+            f"curl -X POST -H 'Authorization: Bearer ock_xxx' \\\n"
+            f"     -H 'Content-Type: application/json' \\\n"
+            f"     -d '{__import__('json').dumps(schema.get('example', {}))}' \\\n"
+            f"     https://unified-router.vercel.app/v1/{product_slug}/run"
+        ),
     }
