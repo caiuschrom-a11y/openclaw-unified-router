@@ -1,0 +1,326 @@
+"""SaaS API gateway: validate ock_xxx tokens and proxy to Anthropic.
+
+Architecture:
+    customer pays via Stripe Checkout
+        → webhook generates ock_xxx, attaches to Stripe customer metadata
+        → email delivers ock_xxx to buyer
+    buyer calls /v1/<slug>/<endpoint> with `Authorization: Bearer ock_xxx`
+        → this module validates the token via Stripe customer search
+        → applies the product-specific prompt/system message
+        → proxies to Anthropic with our backend key
+        → tracks usage via Stripe customer metadata
+        → returns Claude response
+
+Why Stripe-as-DB: Vercel serverless filesystem is ephemeral, and we don't
+want to operate a separate database for v1. Stripe Customer + Subscription
+metadata is durable, free, and we already query it on every webhook.
+
+Quota: each plan declares `monthly_quota` in its catalog metadata. The
+gateway increments `calls_this_month` on the Stripe customer and 429s when
+exceeded. The counter resets via a monthly Stripe webhook (TODO).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+from typing import Any
+
+import stripe
+from fastapi import APIRouter, HTTPException, Header, Request
+
+router = APIRouter()
+
+ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
+
+# Per-product prompt templates. Each entry maps a product slug to a system
+# prompt + a function building the user content from the request body. This
+# is what makes "coldmail" different from "code-review-bot" — same backend,
+# different domain knowledge applied.
+PRODUCT_PROMPTS: dict[str, dict[str, Any]] = {
+    "coldmail": {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 800,
+        "system": (
+            "You write cold-emails that get replies. Tone: brief, specific, no fluff. "
+            "Open with one observation about the recipient or their company. "
+            "Make ONE concrete ask. End with a one-line PS that creates curiosity. "
+            "Output only the email body — no subject line, no signature placeholders."
+        ),
+        "build_user": lambda body: (
+            f"Recipient: {body.get('recipient_name', '(unknown)')} at {body.get('recipient_company', '(unknown)')}\n"
+            f"Their context: {body.get('context', '')}\n"
+            f"My offer / ask: {body.get('offer', '')}\n"
+            f"My company: {body.get('sender_company', '')}\n"
+            "Write the email."
+        ),
+    },
+    "code-review-bot": {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 2000,
+        "system": (
+            "You review pull requests like a senior engineer. Focus only on issues "
+            "that genuinely matter: bugs, race conditions, security, regressions, "
+            "test gaps. Skip nits and style unless they obscure logic. "
+            "Cite the line you mean. End with VERDICT: APPROVE / REQUEST_CHANGES / COMMENT."
+        ),
+        "build_user": lambda body: (
+            f"PR title: {body.get('pr_title', '')}\n"
+            f"PR description: {body.get('pr_description', '')}\n"
+            f"Diff:\n```\n{body.get('diff', '')}\n```\n"
+            "Review."
+        ),
+    },
+    "pricing-intel": {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 1000,
+        "system": (
+            "You analyze competitor pricing pages. Extract: tier names, monthly "
+            "prices, listed features, target segments. Flag anything ambiguous. "
+            "Return strict JSON: {tiers: [{name, price_monthly_usd, features: [...], notes}]}"
+        ),
+        "build_user": lambda body: (
+            f"Competitor: {body.get('competitor', '')}\n"
+            f"Page text:\n```\n{body.get('page_text', '')}\n```\n"
+            "Extract pricing."
+        ),
+    },
+    "shopify-support-bot": {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 600,
+        "system": (
+            "You answer Shopify-store customer support questions. Be friendly, "
+            "concise, and specific. Reference the customer's order if provided. "
+            "Never invent shipping dates or refund policies — defer to the operator "
+            "if you don't know."
+        ),
+        "build_user": lambda body: (
+            f"Store: {body.get('store_name', '')}\n"
+            f"Customer order: {body.get('order_summary', '')}\n"
+            f"Customer message: {body.get('customer_message', '')}\n"
+            f"Store policies: {body.get('policies', '(none provided)')}\n"
+            "Reply."
+        ),
+    },
+    "meeting-notes-bot": {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 1500,
+        "system": (
+            "You produce concise meeting notes from a transcript. Output four "
+            "sections: TLDR (1 sentence), DECISIONS (bulleted), ACTION ITEMS "
+            "(owner — task — due-date), OPEN QUESTIONS (bulleted)."
+        ),
+        "build_user": lambda body: (
+            f"Meeting: {body.get('meeting_title', '')}\n"
+            f"Attendees: {body.get('attendees', '')}\n"
+            f"Transcript:\n```\n{body.get('transcript', '')}\n```\n"
+            "Notes."
+        ),
+    },
+    "chargeback-drafter": {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 1800,
+        "system": (
+            "You draft chargeback rebuttal letters for SMB merchants. Address the "
+            "specific dispute reason. Cite delivery proof, customer agreement, "
+            "and any provided communications. Tone: professional, factual."
+        ),
+        "build_user": lambda body: (
+            f"Dispute reason: {body.get('reason_code', '')} - {body.get('reason_text', '')}\n"
+            f"Order: {body.get('order_summary', '')}\n"
+            f"Evidence available: {body.get('evidence', '')}\n"
+            "Draft the rebuttal."
+        ),
+    },
+    "legal-doc-drafter": {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 3000,
+        "system": (
+            "You draft contract templates for SMB founders. Plain English where "
+            "possible. Mark every blank to fill with [BRACKETS]. Include a brief "
+            "explainer comment for each major clause. End with a JURISDICTION + "
+            "REVIEW BY ATTORNEY disclaimer."
+        ),
+        "build_user": lambda body: (
+            f"Document type: {body.get('doc_type', '')}\n"
+            f"Parties: {body.get('parties', '')}\n"
+            f"Key terms: {body.get('key_terms', '')}\n"
+            f"Jurisdiction: {body.get('jurisdiction', 'unspecified')}\n"
+            "Draft."
+        ),
+    },
+    "voice-agent-smb": {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 800,
+        "system": (
+            "You are a phone receptionist for a small business. Answer in one or "
+            "two short sentences. Capture: caller name, callback number, reason "
+            "for call. If asked about pricing/availability, answer if known else "
+            "promise a callback. Do not invent details."
+        ),
+        "build_user": lambda body: (
+            f"Business: {body.get('business_name', '')}\n"
+            f"Business hours: {body.get('hours', '')}\n"
+            f"Services: {body.get('services', '')}\n"
+            f"Caller said: {body.get('caller_input', '')}\n"
+            f"Conversation so far: {body.get('history', '')}\n"
+            "Respond."
+        ),
+    },
+    "hipaa-doc-intake": {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 1500,
+        "system": (
+            "You extract structured intake fields from patient-facing forms. "
+            "Output JSON only. Fields: full_name, dob, mrn, presenting_concern, "
+            "medications, allergies, insurance_carrier, insurance_member_id. "
+            "Use null if not present. Do NOT invent values."
+        ),
+        "build_user": lambda body: (
+            f"Form text:\n```\n{body.get('form_text', '')}\n```\n"
+            "Extract."
+        ),
+    },
+}
+
+
+def _stripe_key() -> str:
+    key = os.environ.get("STRIPE_SECRET_KEY")
+    if not key:
+        raise HTTPException(500, "STRIPE_SECRET_KEY not set")
+    stripe.api_key = key
+    return key
+
+
+def _validate_token(token: str, product_slug: str) -> dict[str, Any]:
+    """Validate ock_xxx against Stripe customer metadata. Returns customer obj
+    on success. Raises HTTPException on failure."""
+    if not token.startswith("ock_"):
+        raise HTTPException(401, "invalid token format")
+    _stripe_key()
+    try:
+        results = stripe.Customer.search(
+            query=f'metadata["openclaw_api_key"]:"{token}" AND metadata["product_slug"]:"{product_slug}"',
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"auth backend unavailable: {e}")
+    customers = list(results.auto_paging_iter()) if hasattr(results, "auto_paging_iter") else results.data
+    if not customers:
+        raise HTTPException(401, "unknown or revoked token")
+    customer = customers[0]
+    if customer.get("metadata", {}).get("status") == "canceled":
+        raise HTTPException(403, "subscription canceled")
+    return customer
+
+
+def _bump_quota(customer_id: str, used: int = 1) -> None:
+    """Best-effort increment of calls_this_month. Stripe metadata values are
+    strings so we have to read-modify-write."""
+    try:
+        c = stripe.Customer.retrieve(customer_id)
+        prev = int(c.get("metadata", {}).get("calls_this_month", "0") or "0")
+        stripe.Customer.modify(
+            customer_id,
+            metadata={"calls_this_month": str(prev + used)},
+        )
+    except Exception as e:  # noqa: BLE001
+        # Don't fail the user request just because the meter tick failed.
+        print(f"[gateway] quota tick failed for {customer_id}: {e}")
+
+
+def _call_anthropic(system: str, user_content: str, model: str, max_tokens: int) -> tuple[bool, str, dict[str, Any] | str]:
+    """One Anthropic call with retry on 429/5xx. Returns (ok, status_label, body)."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return (False, "no_key", "ANTHROPIC_API_KEY not set on router")
+    payload = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": [{"role": "user", "content": user_content}],
+    }
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "Content-Type": "application/json",
+        "User-Agent": "openclaw-products/0.1",
+    }
+    backoff = [0.5, 2.0, 5.0]
+    last = ""
+    for attempt, sleep_s in enumerate(backoff, start=1):
+        req = urllib.request.Request(ANTHROPIC_API, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                return (True, "ok", json.loads(resp.read().decode("utf-8")))
+        except urllib.error.HTTPError as e:
+            code = e.code
+            last = f"HTTP {code}: {e.read().decode('utf-8', errors='replace')[:500]}"
+            if 400 <= code < 500 and code != 429:
+                return (False, f"http_{code}", last)
+        except Exception as e:  # noqa: BLE001
+            last = f"{type(e).__name__}: {e}"
+        if attempt < len(backoff):
+            time.sleep(sleep_s)
+    return (False, "retry_exhausted", last)
+
+
+@router.post("/v1/{product_slug}/run")
+async def run_product(product_slug: str, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "missing bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+
+    if product_slug not in PRODUCT_PROMPTS:
+        raise HTTPException(404, f"unknown product: {product_slug}")
+
+    customer = _validate_token(token, product_slug)
+    md = customer.get("metadata", {}) or {}
+    quota = int(md.get("monthly_quota", "0") or "0")
+    used = int(md.get("calls_this_month", "0") or "0")
+    if quota and used >= quota:
+        raise HTTPException(429, f"monthly quota exceeded ({used}/{quota})")
+
+    body = await request.json()
+    cfg = PRODUCT_PROMPTS[product_slug]
+    user_content = cfg["build_user"](body)
+    ok, status, response = _call_anthropic(
+        system=cfg["system"], user_content=user_content,
+        model=cfg["model"], max_tokens=cfg["max_tokens"],
+    )
+    if not ok:
+        raise HTTPException(502, f"upstream LLM failed: {status} | {str(response)[:300]}")
+
+    _bump_quota(customer["id"])
+    # Strip Anthropic's full response, return only the assistant text + meta
+    text = ""
+    if isinstance(response, dict):
+        for block in response.get("content", []):
+            if block.get("type") == "text":
+                text += block.get("text", "")
+    return {
+        "product": product_slug,
+        "result": text,
+        "model": cfg["model"],
+        "quota": {"used": used + 1, "limit": quota or None},
+    }
+
+
+@router.get("/v1/{product_slug}/info")
+def product_info(product_slug: str) -> dict[str, Any]:
+    """Public — describes the product's expected request body schema."""
+    if product_slug not in PRODUCT_PROMPTS:
+        raise HTTPException(404, f"unknown product: {product_slug}")
+    cfg = PRODUCT_PROMPTS[product_slug]
+    return {
+        "slug": product_slug,
+        "model": cfg["model"],
+        "max_tokens": cfg["max_tokens"],
+        "endpoint": f"POST /v1/{product_slug}/run",
+        "auth": "Bearer ock_xxx (your API key)",
+        "system_prompt_preview": cfg["system"][:200] + "...",
+    }
