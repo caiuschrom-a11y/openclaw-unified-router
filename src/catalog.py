@@ -228,6 +228,180 @@ CATALOG: list[ProductSKU] = [
         metadata={"plan": "individual"},
     ),
 
+    # ---------- tiktok-faceless ----------
+    ProductSKU(
+        product_slug="tiktok-faceless",
+        display_name="tiktok-faceless Single",
+        description="1 TikTok channel — 30 videos/mo, daily auto-post",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="concierge_email",
+        metadata={"plan": "single", "channels": "1", "videos_per_month": "30"},
+    ),
+    ProductSKU(
+        product_slug="tiktok-faceless",
+        display_name="tiktok-faceless Multi",
+        description="5 channels, 30 videos each",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="concierge_email",
+        metadata={"plan": "multi", "channels": "5"},
+    ),
+    ProductSKU(
+        product_slug="tiktok-faceless",
+        display_name="tiktok-faceless Agency",
+        description="25 channels, 30 videos each, white-label",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="concierge_email",
+        metadata={"plan": "agency", "channels": "25"},
+    ),
+
+    # ---------- notion-template-pack ----------
+    ProductSKU(
+        product_slug="notion-template-pack",
+        display_name="notion-template-pack Starter",
+        description="5 founder Notion templates — markdown",
+        pricing_model="one_time",
+        fulfillment_kind="license_key",
+        metadata={"plan": "starter"},
+    ),
+    ProductSKU(
+        product_slug="notion-template-pack",
+        display_name="notion-template-pack Pro",
+        description="Starter + JSON for Notion API auto-import + variants",
+        pricing_model="one_time",
+        fulfillment_kind="license_key",
+        metadata={"plan": "pro"},
+    ),
+    ProductSKU(
+        product_slug="notion-template-pack",
+        display_name="notion-template-pack Agency",
+        description="Pro + underlying YAML schema for fork/remix",
+        pricing_model="one_time",
+        fulfillment_kind="license_key",
+        metadata={"plan": "agency"},
+    ),
+
+    # ---------- skills-bundle ----------
+    ProductSKU(
+        product_slug="skills-bundle",
+        display_name="skills-bundle Lifetime",
+        description="Claude Code skills bundle — 5 skills, lifetime updates",
+        pricing_model="one_time",
+        fulfillment_kind="license_key",
+        metadata={"plan": "lifetime", "skills_count": "5"},
+    ),
+    ProductSKU(
+        product_slug="skills-bundle",
+        display_name="skills-bundle Team",
+        description="Lifetime × 5 seats",
+        pricing_model="one_time",
+        fulfillment_kind="license_key",
+        metadata={"plan": "team", "seats": "5"},
+    ),
+
+    # ---------- algo-research-newsletter ----------
+    ProductSKU(
+        product_slug="algo-research-newsletter",
+        display_name="algo-research-newsletter Reader",
+        description="Weekly backtested-strategy newsletter — read-only",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="subscription_only",
+        metadata={"plan": "reader"},
+    ),
+    ProductSKU(
+        product_slug="algo-research-newsletter",
+        display_name="algo-research-newsletter Builder",
+        description="Reader + raw vectorbt notebook + Alpaca paper-trade hooks",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="subscription_only",
+        metadata={"plan": "builder"},
+    ),
+    ProductSKU(
+        product_slug="algo-research-newsletter",
+        display_name="algo-research-newsletter Firm",
+        description="Builder + 4 office-hour calls/yr",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="concierge_email",
+        metadata={"plan": "firm"},
+    ),
+
+    # ---------- negotiation-overlay ----------
+    ProductSKU(
+        product_slug="negotiation-overlay",
+        display_name="negotiation-overlay Lifetime",
+        description="Chrome ext for car/home/marketplace negotiation — 50 calls/mo",
+        pricing_model="one_time",
+        fulfillment_kind="api_key",
+        metadata={"plan": "lifetime", "monthly_quota": "50"},
+    ),
+    ProductSKU(
+        product_slug="negotiation-overlay",
+        display_name="negotiation-overlay Pro",
+        description="Unlimited negotiation scripts, 1 device",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="api_key",
+        metadata={"plan": "pro", "monthly_quota": "999999"},
+    ),
+    ProductSKU(
+        product_slug="negotiation-overlay",
+        display_name="negotiation-overlay Family",
+        description="Unlimited, 5 devices",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="api_key",
+        metadata={"plan": "family", "monthly_quota": "999999", "device_cap": "5"},
+    ),
+
+    # ---------- fda-approvals ----------
+    ProductSKU(
+        product_slug="fda-approvals",
+        display_name="fda-approvals Watcher",
+        description="Daily FDA approval digest — 3 saved filters",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="api_key",
+        metadata={"plan": "watcher", "filter_count": "3"},
+    ),
+    ProductSKU(
+        product_slug="fda-approvals",
+        display_name="fda-approvals Pro",
+        description="Daily + intra-day alerts, 10 filters, API access",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="api_key",
+        metadata={"plan": "pro", "filter_count": "10", "api_quota": "1000"},
+    ),
+    ProductSKU(
+        product_slug="fda-approvals",
+        display_name="fda-approvals Firm",
+        description="Pro + team distribution, 20 filters, 10k API/mo",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="api_key",
+        metadata={"plan": "firm", "filter_count": "20", "api_quota": "10000"},
+    ),
+
+    # ---------- gdpr-dsar ----------
+    ProductSKU(
+        product_slug="gdpr-dsar",
+        display_name="gdpr-dsar Single",
+        description="One Article 15 DSAR response packet — 5-day turnaround",
+        pricing_model="one_time",
+        fulfillment_kind="concierge_email",
+        metadata={"engagement_kind": "single_dsar"},
+    ),
+    ProductSKU(
+        product_slug="gdpr-dsar",
+        display_name="gdpr-dsar Monthly",
+        description="Unlimited DSARs — up to 10 in flight at any time",
+        pricing_model="subscription_monthly",
+        fulfillment_kind="concierge_email",
+        metadata={"plan": "monthly", "in_flight_cap": "10"},
+    ),
+    ProductSKU(
+        product_slug="gdpr-dsar",
+        display_name="gdpr-dsar Annual",
+        description="Monthly plan + quarterly preparedness review",
+        pricing_model="subscription_annual",
+        fulfillment_kind="concierge_email",
+        metadata={"plan": "annual", "includes_review": "true"},
+    ),
+
     # Add more SKUs as you wire them up. The pattern is consistent.
 ]
 

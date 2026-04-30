@@ -64,7 +64,7 @@ def handle_checkout_completed(session: dict[str, Any]) -> None:
             import stripe as _stripe
             if not _stripe.api_key:
                 _stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
-            site = os.environ.get("PORTFOLIO_SITE_URL", "https://portfolio-site-beta-swart-35.vercel.app")
+            site = os.environ.get("PORTFOLIO_SITE_URL", "https://openclaw-revenue.vercel.app")
             sess = _stripe.billing_portal.Session.create(
                 customer=base_order["stripe_customer_id"],
                 return_url=site,
@@ -107,7 +107,7 @@ def handle_checkout_completed(session: dict[str, Any]) -> None:
                 f"    curl -X POST -H \"Authorization: Bearer {api_key}\" \\\n"
                 f"         -H \"Content-Type: application/json\" \\\n"
                 f"         -d '{{\"<see /v1/{product_slug}/info>\"}}' \\\n"
-                f"         https://unified-router.vercel.app/v1/{product_slug}/run\n\n"
+                f"         https://openclawapi.vercel.app/v1/{product_slug}/run\n\n"
                 f"Quota: {md.get('monthly_quota', 'unlimited')} calls/month on the {md.get('plan', 'standard')} plan.\n"
                 f"{portal_block}\n"
                 f"Questions: reply to this email.\n"

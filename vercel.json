@@ -4,7 +4,11 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python",
-      "config": { "includeFiles": "{src/**,price_ids.yaml}" }
+      "config": {
+        "includeFiles": "{src/**,price_ids.yaml}",
+        "maxLambdaSize": "50mb",
+        "maxDuration": 60
+      }
     }
   ],
   "routes": [

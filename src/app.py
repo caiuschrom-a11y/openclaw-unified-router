@@ -21,7 +21,7 @@ from pathlib import Path
 
 import stripe
 import yaml
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -29,6 +29,31 @@ from . import catalog, fulfillment, gateway
 
 app = FastAPI(title="openclaw-products unified router", version="0.1.0")
 app.include_router(gateway.router)
+
+
+# Twilio voice-agent webhooks. These are configured in each subscriber's
+# Twilio TwiML App. Subscribers set their twilio_to number via metadata.
+from . import twilio_webhook
+
+
+@app.post("/twilio/voice")
+async def twilio_voice(request: Request) -> Response:
+    """Inbound call greeting + first gather."""
+    import urllib.parse as _u
+    form_bytes = await request.body()
+    form = dict(_u.parse_qsl(form_bytes.decode("utf-8")))
+    twiml = twilio_webhook.handle_voice_inbound(form)
+    return Response(content=twiml, media_type="application/xml")
+
+
+@app.post("/twilio/respond")
+async def twilio_respond(request: Request) -> Response:
+    """Subsequent turn after caller spoke."""
+    import urllib.parse as _u
+    form_bytes = await request.body()
+    form = dict(_u.parse_qsl(form_bytes.decode("utf-8")))
+    twiml = twilio_webhook.handle_voice_respond(form)
+    return Response(content=twiml, media_type="application/xml")
 
 
 def _stripe_key() -> str:
@@ -113,7 +138,8 @@ def _fetch_price_amount(price_id: str) -> tuple[int | None, str | None, str | No
 
 
 @app.get("/v1/products")
-def list_products() -> dict:
+def list_products(response: "Response") -> dict:
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     price_map_file = Path(__file__).resolve().parent.parent / "price_ids.yaml"
     price_map = yaml.safe_load(price_map_file.read_text(encoding="utf-8")) if price_map_file.exists() else {}
 
@@ -160,7 +186,7 @@ def customer_portal(payload: PortalIn) -> dict:
     customers = stripe.Customer.list(email=payload.customer_email, limit=1)
     if not customers.data:
         raise HTTPException(404, f"no customer found for {payload.customer_email}")
-    site = os.environ.get("PORTFOLIO_SITE_URL", "https://portfolio-site-beta-swart-35.vercel.app")
+    site = os.environ.get("PORTFOLIO_SITE_URL", "https://openclaw-revenue.vercel.app")
     return_url = payload.return_url or site
     session = stripe.billing_portal.Session.create(
         customer=customers.data[0].id,
@@ -183,7 +209,7 @@ def create_checkout(product_slug: str, tier_name: str, payload: CheckoutIn) -> d
     price_id = _price_for(sku.display_name)
     mode = "subscription" if sku.pricing_model.startswith("subscription") else "payment"
 
-    site = os.environ.get("PORTFOLIO_SITE_URL", "https://portfolio-site-beta-swart-35.vercel.app")
+    site = os.environ.get("PORTFOLIO_SITE_URL", "https://openclaw-revenue.vercel.app")
     success = payload.success_url or f"{site}/success?slug={product_slug}"
     cancel = payload.cancel_url or f"{site}/products/{product_slug}"
 

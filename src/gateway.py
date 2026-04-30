@@ -212,9 +212,24 @@ def _validate_token(token: str, product_slug: str) -> dict[str, Any]:
     if not customers:
         raise HTTPException(401, "unknown or revoked token")
     customer = customers[0]
-    if customer.get("metadata", {}).get("status") == "canceled":
+    # Stripe objects don't have .get(); use dict-style access via __getitem__.
+    md_obj = customer["metadata"] if "metadata" in customer else None
+    # StripeObject metadata is dict-like but `dict(md)` iterates with integer
+    # indices and raises KeyError. Convert via the keys() iterator.
+    md_dict: dict[str, Any] = {}
+    if md_obj is not None:
+        try:
+            for k in list(md_obj.keys()):
+                md_dict[k] = md_obj[k]
+        except Exception:  # noqa: BLE001
+            md_dict = {}
+    if md_dict.get("status") == "canceled":
         raise HTTPException(403, "subscription canceled")
-    return customer
+    return {
+        "id": customer["id"],
+        "email": customer["email"] if "email" in customer else None,
+        "metadata": md_dict,
+    }
 
 
 def _bump_quota(customer_id: str, used: int = 1) -> None:
@@ -222,7 +237,8 @@ def _bump_quota(customer_id: str, used: int = 1) -> None:
     strings so we have to read-modify-write."""
     try:
         c = stripe.Customer.retrieve(customer_id)
-        prev = int(c.get("metadata", {}).get("calls_this_month", "0") or "0")
+        md = c["metadata"] if "metadata" in c else {}
+        prev = int(md["calls_this_month"]) if "calls_this_month" in md and md["calls_this_month"] else 0
         stripe.Customer.modify(
             customer_id,
             metadata={"calls_this_month": str(prev + used)},
@@ -232,15 +248,78 @@ def _bump_quota(customer_id: str, used: int = 1) -> None:
         print(f"[gateway] quota tick failed for {customer_id}: {e}")
 
 
+def _call_qwen_fallback(system: str, user_content: str, max_tokens: int) -> tuple[bool, str, dict[str, Any] | str]:
+    """Fallback to a self-hosted Qwen via Ollama (HTTP). The user runs Ollama
+    locally and exposes it via a Cloudflare Tunnel; the public URL goes into
+    QWEN_PROXY_URL on the router. Wraps Ollama's response so it looks like
+    an Anthropic content block."""
+    base = os.environ.get("QWEN_PROXY_URL", "").rstrip("/")
+    if not base:
+        return (False, "no_qwen", "QWEN_PROXY_URL not set on router")
+    model = os.environ.get("QWEN_MODEL", "qwen3-30b")
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_content},
+        ],
+        "stream": False,
+        # Qwen3 has hybrid thinking; disable it so num_predict isn't burned
+        # on internal reasoning the buyer never sees.
+        "think": False,
+        "options": {"num_predict": max_tokens, "temperature": 0.6},
+    }
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "openclaw-products/0.1",
+    }
+    # If the tunnel is protected by a Cloudflare Access token, support it.
+    cf_access = os.environ.get("QWEN_PROXY_CF_ACCESS")
+    if cf_access:
+        headers["CF-Access-Client-Secret"] = cf_access
+    try:
+        req = urllib.request.Request(f"{base}/api/chat", data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            d = json.loads(resp.read().decode("utf-8"))
+        text = d.get("message", {}).get("content", "")
+        # Re-shape into an Anthropic-compatible response so the rest of the
+        # gateway code doesn't need to branch.
+        return (True, "ok_qwen", {"content": [{"type": "text", "text": text}]})
+    except urllib.error.HTTPError as e:
+        return (False, f"qwen_http_{e.code}", e.read().decode("utf-8", errors="replace")[:400])
+    except Exception as e:  # noqa: BLE001
+        return (False, "qwen_err", f"{type(e).__name__}: {e}")
+
+
 def _call_anthropic(system: str, user_content: str, model: str, max_tokens: int) -> tuple[bool, str, dict[str, Any] | str]:
-    """One Anthropic call with retry on 429/5xx. Returns (ok, status_label, body)."""
+    """One Anthropic call with retry on 429/5xx. Returns (ok, status_label, body).
+
+    Prompt caching: the per-product `system` prompt is static, so we mark it
+    with cache_control=ephemeral. After the first call per product, subsequent
+    calls in the 5-minute window read the system prompt from cache at 1/10th
+    the input-token cost. This is the single biggest token-spend lever.
+
+    On Anthropic insufficient_credit / not configured: falls through to Qwen
+    via QWEN_PROXY_URL when set. This keeps SaaS products live during Anthropic
+    propagation issues."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return (False, "no_key", "ANTHROPIC_API_KEY not set on router")
+    # If operator has set FORCE_QWEN=1, skip Anthropic entirely (useful when
+    # we know the Anthropic balance is empty — saves 1-2s on the inevitable
+    # 400 response before falling through).
+    force_qwen = os.environ.get("FORCE_QWEN", "").strip().lower() in ("1", "true", "yes")
+    if force_qwen or not api_key:
+        ok, status, body = _call_qwen_fallback(system, user_content, max_tokens)
+        if ok:
+            return (True, "ok_qwen", body)
+        return (False, "qwen_only_path_failed", f"Qwen fallback failed: {body}")
     payload = {
         "model": model,
         "max_tokens": max_tokens,
-        "system": system,
+        "system": [
+            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
+        ],
         "messages": [{"role": "user", "content": user_content}],
     }
     body = json.dumps(payload).encode("utf-8")
@@ -249,6 +328,8 @@ def _call_anthropic(system: str, user_content: str, model: str, max_tokens: int)
         "anthropic-version": ANTHROPIC_VERSION,
         "Content-Type": "application/json",
         "User-Agent": "openclaw-products/0.1",
+        # cache_control needs the prompt-caching beta header.
+        "anthropic-beta": "prompt-caching-2024-07-31",
     }
     backoff = [0.5, 2.0, 5.0]
     last = ""
@@ -259,14 +340,26 @@ def _call_anthropic(system: str, user_content: str, model: str, max_tokens: int)
                 return (True, "ok", json.loads(resp.read().decode("utf-8")))
         except urllib.error.HTTPError as e:
             code = e.code
-            last = f"HTTP {code}: {e.read().decode('utf-8', errors='replace')[:500]}"
+            err_body = e.read().decode("utf-8", errors="replace")
+            last = f"HTTP {code}: {err_body[:500]}"
+            # Special-case: Anthropic credit balance too low → fall through to Qwen
+            if "credit balance is too low" in err_body or "insufficient_quota" in err_body:
+                ok, qstatus, qbody = _call_qwen_fallback(system, user_content, max_tokens)
+                if ok:
+                    return (True, "ok_qwen_fallback", qbody)
+                # Both upstreams down — surface both errors
+                return (False, "anthropic_zero_balance_qwen_fail", f"anthropic: {last} | qwen: {qbody}")
             if 400 <= code < 500 and code != 429:
                 return (False, f"http_{code}", last)
         except Exception as e:  # noqa: BLE001
             last = f"{type(e).__name__}: {e}"
         if attempt < len(backoff):
             time.sleep(sleep_s)
-    return (False, "retry_exhausted", last)
+    # All Anthropic retries exhausted — try Qwen as a last resort
+    ok, qstatus, qbody = _call_qwen_fallback(system, user_content, max_tokens)
+    if ok:
+        return (True, "ok_qwen_after_anthropic_retries", qbody)
+    return (False, "retry_exhausted", f"{last} | qwen: {qbody}")
 
 
 @router.post("/v1/{product_slug}/run")
@@ -293,7 +386,15 @@ async def run_product(product_slug: str, request: Request, authorization: str | 
         model=cfg["model"], max_tokens=cfg["max_tokens"],
     )
     if not ok:
-        raise HTTPException(502, f"upstream LLM failed: {status} | {str(response)[:300]}")
+        # Translate common upstream failures into actionable buyer-facing messages.
+        msg = str(response)[:500]
+        if "credit balance is too low" in msg or "insufficient_quota" in msg:
+            raise HTTPException(503, "service temporarily paused (operator notified). Email support@openclaw.dev for status.")
+        if "rate_limit" in msg.lower() or "429" in msg:
+            raise HTTPException(429, "rate limit hit. Try again in 30s, or upgrade plan for higher limits.")
+        if "api_key" in msg.lower() or "auth" in msg.lower() or "401" in msg:
+            raise HTTPException(503, "auth error with upstream LLM (operator notified)")
+        raise HTTPException(502, f"upstream LLM failed: {status} | {msg[:200]}")
 
     _bump_quota(customer["id"])
     # Strip Anthropic's full response, return only the assistant text + meta
@@ -432,6 +533,6 @@ def product_info(product_slug: str) -> dict[str, Any]:
             f"curl -X POST -H 'Authorization: Bearer ock_xxx' \\\n"
             f"     -H 'Content-Type: application/json' \\\n"
             f"     -d '{__import__('json').dumps(schema.get('example', {}))}' \\\n"
-            f"     https://unified-router.vercel.app/v1/{product_slug}/run"
+            f"     https://openclawapi.vercel.app/v1/{product_slug}/run"
         ),
     }
